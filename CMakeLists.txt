@@ -1,114 +1,70 @@
 cmake_minimum_required (VERSION 2.8.10 FATAL_ERROR)
 
-project (wsjt-superbuild)
+project (sbitx-superbuild)
 
-set (__default_tag master)
-
-set (WSJTX_TAG ${__default_tag}
-  CACHE STRING "WSJT-X tag to build, if unset build the latest master branch HEAD.
-
-For a tag use <tag-name> e.g. wsjtx-2.0.0
-
-The  WSJTX_TAG option  is  only used  if the  directory  'src' is  not
-present.   If the  'src' directory  is present  the build  expects the
-sources to be found in it consisting of the two files 'hamlib.tgz' and
-'wsjtx.tgz'.  This 'src' directory is to  be used where build hosts do
-not allow  source downloads using Subversion,  git or cURL as  part of
-the build.  See the  'source' target  for how  to generate  a suitable
-source tarball." )
-
-
+# Set Versions and Branches to build for components
 #
-# find prerequisites
-#
-# Find_library (USB_LIBRARY NAMES libusb.a usb)
-Find_program (PATCH_EXECUTABLE patch REQUIRED)
-Find_package (Git REQUIRED)
+set (FFTW3_VER 3.3.9
+      CACHE STRING "FFTW3 version to build from officially released source."
+      )
 
+# Find Pre-requisites
 #
-# extra C flags to minimize hamlib excutable sizes
-#
-if (NOT APPLE)
-  set (EXTRA_FLAGS "CFLAGS=-g -O2 -fPIC -fdata-sections -ffunction-sections" "LDFLAGS=-Wl,--gc-sections")
-endif (NOT APPLE)
+find_program(PATCH_EXECUTABLE patch REQUIRED)
+find_package(Git REQUIRED)
 
-
+# Auxiliary Functions
 #
-# function to read and extract MD5 hashes from a file
-#
-function (read_md5sum file result_variable)
-  file (READ ${file}.md5sum md5sum)
+function (read_md5sum md5sum_file md5sum_result)
+  file (READ ${md5sum_file}.md5sum md5sum)
   string (REGEX REPLACE "^([^ ]+).*$" "\\1" md5sum ${md5sum})
-  set (${result_variable} ${md5sum} PARENT_SCOPE)
+  set (${md5sum_result} ${md5sum} PARENT_SCOPE)
 endfunction (read_md5sum)
 
-
-#
 # work out what we want to build
 #
-if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src")
-  # one day this needs to change to the hamlib git master
-  set (hamlib_repo git://git.code.sf.net/u/bsomervi/hamlib)
+set (__default_branch main)
+set (sbitx_repo https://github.com/taskmaster9001/sbitx)
+set (SBITX_TAG cmake)
+set (target_dir sbitx)
+message (STATUS "Building SBIT-X branch: ${SBITX_TAG}")
 
-  set (wsjtx_repo git://git.code.sf.net/p/wsjt/wsjtx)
+# if(EXISTS src/fftw3.tar.gz.md5sum)
+#   read_md5sum(src/fftw3.tar.gz.md5sum fftw3_md5sum)
+# endif()
 
-  # one day this needs to change to master or some agreed stable SHA
-  set (hamlib_TAG integration)
-
-  # decide if we want to build from master or a tag
-  if (NOT ${WSJTX_TAG} STREQUAL ${__default_tag})
-    # assume we have a tag so find matching hamlib tag
-    #
-    # this assumed that a tag exists in the hamlib repository that is
-    # exactly the same as the WSJT-X repository tag we intend to build
-    # from
-    set (hamlib_TAG "${WSJTX_TAG}")
-    set (target_dir "${WSJTX_TAG}")
-    message (STATUS "Building WSJT-X tag: ${WSJTX_TAG}")
-    message (STATUS "hamlib tag: ${hamlib_TAG}")
-  else ()
-    set (target_dir wsjtx)
-    message (STATUS "Building WSJT-X branch: ${WSJTX_TAG}")
-    message (STATUS "hamlib branch: ${hamlib_TAG}")
-  endif ()
-else (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src")
-  read_md5sum (src/hamlib.tgz hamlib_md5sum)
-  read_md5sum (src/wsjtx.tgz wsjtx_md5sum)
-endif (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src")
-
+# if(EXISTS src/sbitx.tar.gz.md5sum)
+#   read_md5sum(src/sbitx.tar.gz.md5sum sbitx_md5sum)
+# endif()
 
 include (ExternalProject)
 
 
+# build and install fftw3 locally so it can be referenced by the
+# SBIT-X build
 #
-# build and install hamlib locally so it can be referenced by the
-# WSJT-X build
-#
-ExternalProject_Add (hamlib
-  GIT_REPOSITORY ${hamlib_repo}
-  GIT_TAG ${hamlib_TAG}
-  URL ${CMAKE_CURRENT_SOURCE_DIR}/src/hamlib.tgz
-  URL_HASH MD5=${hamlib_md5sum}
-  UPDATE_COMMAND ./bootstrap
-  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N < ${CMAKE_CURRENT_SOURCE_DIR}/hamlib.patch
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --disable-shared --enable-static --without-cxx-binding ${EXTRA_FLAGS} # LIBUSB_LIBS=${USB_LIBRARY}
-  BUILD_COMMAND $(MAKE) all V=1 # $(MAKE) is ExternalProject_Add() magic to do recursive make
+
+ExternalProject_Add (fftw3
+  URL http://fftw.org/fftw-${FFTW3_VER}.tar.gz
+  # URL_HASH MD5=${fftw3_md5sum}
+  # UPDATE_COMMAND ./bootstrap.sh
+  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N < ${CMAKE_CURRENT_SOURCE_DIR}/fftw3.patch
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --disable-shared --enable-threads --with-combined-threads --enable-static ${EXTRA_FLAGS} # LIBUSB_LIBS=${USB_LIBRARY}
+  BUILD_COMMAND $(MAKE) V=1
   INSTALL_COMMAND $(MAKE) install-strip V=1 DESTDIR=""
   STEP_TARGETS update install
   )
 
 #
-# custom target to make a hamlib source tarball
+# custom target to make a fftw3 source tarball
 #
-add_custom_target (hamlib_sources
-  COMMAND ${GIT_EXECUTABLE} archive --format=tgz --prefix=hamlib/ --remote=${hamlib_repo} ${hamlib_TAG} -o ${CMAKE_CURRENT_BINARY_DIR}/hamlib.tgz
-  COMMENT "Generating the hamlib upstream source tarball"
+add_custom_target (fftw3_sources
+  COMMAND ${GIT_EXECUTABLE} archive --format=tgz --prefix=fftw3/ --remote=${fftw3_repo} ${fftw3_TAG} -o ${CMAKE_CURRENT_BINARY_DIR}/fftw3.tar.gz
+  COMMENT "Generating the fftw3 upstream source tarball"
   )
 
 
-#
-# build a list of command line argumenst to pass on to the WSJT-X
-# build
+# build a list of command line arguments to pass on to the SBIT-X build
 #
 get_cmake_property (CACHE_VARS CACHE_VARIABLES)
 foreach (CACHE_VAR ${CACHE_VARS})
@@ -124,54 +80,55 @@ foreach (CACHE_VAR ${CACHE_VARS})
   endif ()
 endforeach ()
 
-#
-# build and optionally install WSJT-X using the hamlib package built
+
+# build and optionally install SBIT-X using the fftw3 package built
 # above
 #
-ExternalProject_Get_Property (hamlib INSTALL_DIR)
-ExternalProject_Add (wsjtx
-  GIT_REPOSITORY ${wsjtx_repo}
-  GIT_TAG ${WSJTX_TAG}
-  URL ${CMAKE_CURRENT_SOURCE_DIR}/src/wsjtx.tgz
-  URL_HASH MD5=${wsjtx_md5sum}
-  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N < ${CMAKE_CURRENT_SOURCE_DIR}/wsjtx.patch
+ExternalProject_Get_Property (fftw3 INSTALL_DIR)
+
+ExternalProject_Add (sbitx
+  GIT_REPOSITORY ${sbitx_repo}
+  GIT_TAG ${SBITX_TAG}
+  URL ${CMAKE_CURRENT_SOURCE_DIR}/src/sbitx.tar.gz
+  URL_HASH MD5=${sbitx_md5sum}
+  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 -N < ${CMAKE_CURRENT_SOURCE_DIR}/sbitx.patch
   CMAKE_ARGS
   ${CMAKE_ARGS}
   -DCMAKE_PREFIX_PATH=${INSTALL_DIR}
   -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-  ${WSJTX_EXTRA_CMAKE_OPTIONS}
+  ${SBITX_EXTRA_CMAKE_OPTIONS}
   INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
   STEP_TARGETS update configure build install package
   )
-ExternalProject_Add_Step (wsjtx package
+ExternalProject_Add_Step (sbitx package
   COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target package
-  COMMAND echo "Built hamlib from branch/tag: ${hamlib_TAG}"
-  COMMAND echo "Built WSJT-X from: ${WSJTX_TAG}"
+  COMMAND echo "Built fftw3 from branch/tag: ${fftw3_TAG}"
+  COMMAND echo "Built SBIT-X from: ${SBITX_TAG}"
   COMMAND echo "Package(s) generated in ${BINARY_DIR}."
-  COMMENT "Generating WSJT-X package."
+  COMMENT "Generating SBIT-X package."
   DEPENDEES build
   )
 
-set_target_properties (hamlib PROPERTIES EXCLUDE_FROM_ALL 1)
-set_target_properties (wsjtx PROPERTIES EXCLUDE_FROM_ALL 1)
+set_target_properties (fftw3 PROPERTIES EXCLUDE_FROM_ALL 1)
+set_target_properties (sbitx PROPERTIES EXCLUDE_FROM_ALL 1)
 
-add_dependencies (wsjtx-configure hamlib-install)
-add_dependencies (wsjtx-build hamlib-install)
-add_dependencies (wsjtx-install hamlib-install)
-add_dependencies (wsjtx-package hamlib-install)
+add_dependencies (sbitx-configure fftw3-install)
+add_dependencies (sbitx-build fftw3-install)
+add_dependencies (sbitx-install fftw3-install)
+add_dependencies (sbitx-package fftw3-install)
 
 # export traditional targets
-add_custom_target (build ALL DEPENDS wsjtx-build)
-add_custom_target (install DEPENDS wsjtx-install)
-add_custom_target (package DEPENDS wsjtx-package)
+add_custom_target (build ALL DEPENDS sbitx-build)
+add_custom_target (install DEPENDS sbitx-install)
+add_custom_target (package DEPENDS sbitx-package)
 
 
 #
-# custom target to make WSJT-X source tarball
+# custom target to make SBIT-X source tarball
 #
-add_custom_target (wsjtx_sources
-  COMMAND ${GIT_EXECUTABLE} archive --format=tgz --prefix=wsjtx/ --remote=${wsjtx_repo} ${WSJTX_TAG} -o ${CMAKE_CURRENT_BINARY_DIR}/wsjtx.tgz
-  COMMENT "Generating the WSJT-X upstream source tarball"
+add_custom_target (sbitx_sources
+  COMMAND ${GIT_EXECUTABLE} archive --format=tgz --prefix=sbitx/ --remote=${sbitx_repo} ${SBITX_TAG} -o ${CMAKE_CURRENT_BINARY_DIR}/sbitx.tar.gz
+  COMMENT "Generating the SBIT-X upstream source tarball"
   )
 
 
@@ -185,17 +142,17 @@ add_custom_target (source
   COMMAND ${CMAKE_COMMAND} -E remove_directory ${target_dir}/.svn
   COMMAND ${CMAKE_COMMAND} -E remove_directory ${target_dir}/.git
   COMMAND ${CMAKE_COMMAND} -E make_directory ${target_dir}/src
-  COMMAND ${CMAKE_COMMAND} -E rename hamlib.tgz ${target_dir}/src/hamlib.tgz
-  COMMAND ${CMAKE_COMMAND} -E rename wsjtx.tgz ${target_dir}/src/wsjtx.tgz
-  COMMAND ${CMAKE_COMMAND} -E md5sum ${target_dir}/src/hamlib.tgz > ${target_dir}/src/hamlib.tgz.md5sum
-  COMMAND ${CMAKE_COMMAND} -E md5sum ${target_dir}/src/wsjtx.tgz > ${target_dir}/src/wsjtx.tgz.md5sum
+  COMMAND ${CMAKE_COMMAND} -E rename fftw3.tgz ${target_dir}/src/fftw3.tgz
+  COMMAND ${CMAKE_COMMAND} -E rename sbitx.tgz ${target_dir}/src/sbitx.tgz
+  COMMAND ${CMAKE_COMMAND} -E md5sum ${target_dir}/src/fftw3.tgz > ${target_dir}/src/fftw3.tgz.md5sum
+  COMMAND ${CMAKE_COMMAND} -E md5sum ${target_dir}/src/sbitx.tgz > ${target_dir}/src/sbitx.tgz.md5sum
   COMMAND ${CMAKE_COMMAND} -E tar czf ${target_dir}.tgz ${target_dir}
   COMMAND ${CMAKE_COMMAND} -E remove_directory ${target_dir}
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-  DEPENDS hamlib_sources wsjtx_sources
+  DEPENDS fftw3_sources sbitx_sources
   COMMENT "
 
-Generating the WSJT-X superbuild self-contained source tarball ${target_dir}.tgz
+Generating the SBIT-X superbuild self-contained source tarball ${target_dir}.tgz
 
 To use this tarball, transfer it to the target build host, un-compress
 and un-tar it;  then configure it including  a CMAKE_INSTALL_PREFIX if
@@ -210,10 +167,10 @@ example:
     $ sudo cmake --build . --target install
 
 where <extra-args>  are CMake  command line arguments  that are  to be
-passed  onto  the  WSJT-X  CMake  configuration.  The  sort  of  extra
+passed  onto  the  SBIT-X  CMake  configuration.  The  sort  of  extra
 arguments you might want to pass are for example:
 
-  -D WSJT_MANPAGE_DESTINATION=.
+  -D SBIT_MANPAGE_DESTINATION=.
 
 which   changes    the   install   path   for    the   manpages   from
 <install-prefix>/share to  <install-prefix>.  This  particular example
